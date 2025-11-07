@@ -23,6 +23,7 @@ import io
 from absl import flags, logging
 import functools
 
+
 import sys
 sys.path.append(os.path.abspath('./'))
 
@@ -68,6 +69,16 @@ from lib import py_uniform_replay_buffer
 
 FLAGS = flags.FLAGS
 nest = tf.nest
+
+flags.DEFINE_string(
+    'fixed_z', '',
+    '세미콜론(;)으로 구분된 z 행렬. 예: "1,0,0,0,0;0,1,0,0,0;0,0,1,0,0;0,0,0,1,0;0,0,0,0,1"'
+)
+flags.DEFINE_integer(
+    'repeat_per_z', 1,
+    '각 z를 몇 번 반복 롤아웃할지'
+)
+
 
 # general hyperparameters
 flags.DEFINE_string('logdir', '~/tmp/dads', 'Directory for saving experiment data')
@@ -221,6 +232,18 @@ sample_count = 0
 iter_count = 0
 episode_size_buffer = []
 episode_return_buffer = []
+
+
+### 추가. 유틸
+def _parse_fixed_z(fixed_z_str, dim):
+    rows = [r.strip() for r in fixed_z_str.split(';') if r.strip()]
+    Z = []
+    for r in rows:
+        vals = [float(x) for x in r.split(',')]
+        assert len(vals) == dim, f"fixed_z 차원 불일치: 기대 {dim}, 입력 {len(vals)}"
+        Z.append(vals)
+    import numpy as np
+    return np.asarray(Z, dtype=np.float32)
 
 # add a flag for state dependent std
 def _normal_projection_net(action_spec, init_means_output_factor=0.1):
@@ -1373,7 +1396,7 @@ def main(_):
           if FLAGS.train_skill_dynamics_on_policy:
             skill_dynamics_buffer = on_buffer
 
-          # TODO(architsh): clear_buffer_every_iter needs to fix these as well
+          # TODO(architsh): clear_buffer_every_iter needs to f  ix these as well
           for _ in range(1 if FLAGS.clear_buffer_every_iter else FLAGS
                          .skill_dyn_train_steps):
             if FLAGS.clear_buffer_every_iter:
@@ -1608,7 +1631,7 @@ def main(_):
           #     base_path=eval_dir,
           #     base_name=save_label + '_' + str(goal_idx)))
           # goal_coord = np.array(item[2:])
-          eval_plan_env = get_environment(env_name=FLAGS.environment + '_goal')
+          eval_plan_env = get_environment(env_name=FLAGS.environment) #+ '_goal')
           # _, (ax1, ax2) = plt.subplots(1, 2)
           # ax1.set_xlim(-12, 12)
           # ax1.set_ylim(-12, 12)

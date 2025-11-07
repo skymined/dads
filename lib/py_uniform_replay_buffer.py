@@ -101,11 +101,17 @@ class PyUniformReplayBuffer(replay_buffer.ReplayBuffer):
     with self._lock:
       if self._np_state.size == self._capacity:
         # If we are at capacity, we are deleting element cur_id.
-        self._on_delete(self._storage.get(self._np_state.cur_id))
-      self._storage.set(self._np_state.cur_id, self._encode(item))
+        # self._on_delete(self._storage.get(self._np_state.cur_id))
+        self._on_delete(self._storage.get(int(self._np_state.cur_id % self._capacity)))
+
+      # 안전 인덱스 계산
+      write_idx = int(self._np_state.cur_id % self._capacity)
+      self._storage.set(write_idx, self._encode(item))
+
+      # self._storage.set(self._np_state.cur_id, self._encode(item))
       self._np_state.size = np.minimum(self._np_state.size + 1,
                                        self._capacity)
-      self._np_state.cur_id = (self._np_state.cur_id + 1) % self._capacity
+      self._np_state.cur_id = np.int64((self._np_state.cur_id + 1) % self._capacity)
       self._np_state.item_count += 1
 
   def _get_next(self,
