@@ -235,6 +235,9 @@ episode_return_buffer = []
 
 
 ### 추가. 유틸
+def _to_obs(ts):
+  return ts.observation if hasattr(ts, 'observation') else ts
+
 def _parse_fixed_z(fixed_z_str, dim):
     rows = [r.strip() for r in fixed_z_str.split(';') if r.strip()]
     Z = []
@@ -325,6 +328,69 @@ def hide_coords(time_step):
     return time_step._replace(observation=sans_coords)
 
   return time_step
+
+# [revise] 범용 스킬 평가 함수 추가. MPC-goal 없이 학습이 됐는지 보려면 스킬을 샘플링해 환경을 굴리고 에피소드 리턴, 넘어짐 여부, 평균 속도 등을 저장
+def eval_skills_no_goal(env, policy, num_skills=5, horizon=1000, video_dir=None, log_path=None):
+    import os, csv
+    os.makedirs(video_dir, exist_ok=True) if video_dir else None
+    rows = []
+    for k in range(num_skills):
+        # 스킬 샘플: policy가 연속 z를 쓰면 정규분포, 이산이면 범주에서 선택
+        z = policy.sample_skill() if hasattr(policy, "sample_skill") else np.random.normal(size=(policy.skill_dim,))
+        obs = _to_obs(env.reset())
+        done = False
+        t = 0
+        ret = 0.0
+        alive_steps = 0
+        vx_sum = 0.0
+
+        # (선택) 비디오 기록 세팅
+        recorder = None
+        if video_dir:
+            from gym.wrappers.monitoring.video_recorder import VideoRecorder
+            recorder = VideoRecorder(env, os.path.join(video_dir, f"skill_{k}.mp4"), enabled=True)
+
+        while not done and t < horizon:
+            if recorder: recorder.capture_frame()
+            # 정책은 (obs, z) → action 이어야 함
+            action = policy.act(obs, z)
+            ts = env.step(action)
+            # Gym 호환
+            if len(ts) == 5:  # Gymnasium
+                obs_next, reward, terminated, truncated, info = ts
+                done = terminated or truncated
+            else:             # Gym<0.26
+                obs_next, reward, done, info = ts
+            obs = _to_obs(obs_next)
+            ret += float(reward)
+            t += 1
+
+            # 속도 대용치: info에 없다면 obs에서 루트 속도 성분을 추정하도록 나중에 조정
+            if isinstance(info, dict) and "x_velocity" in info:
+                vx_sum += info["x_velocity"]
+            elif obs.shape[0] > 5:
+                # 대충 루트 속도가 앞부분에 있을 가능성을 가정. 필요시 env 특화로 교체.
+                vx_sum += 0.0
+
+            alive_steps += 1
+
+        if recorder: recorder.close()
+
+        rows.append({
+            "skill_idx": k,
+            "return": ret,
+            "steps": alive_steps,
+            "avg_vx": vx_sum / max(1, alive_steps),
+        })
+
+    # 로그 저장
+    if log_path:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["skill_idx","return","steps","avg_vx"])
+            writer.writeheader()
+            writer.writerows(rows)
+    return rows
 
 
 def relabel_skill(trajectory_sample,
@@ -1010,7 +1076,11 @@ def eval_mppi(
       return (params[0] + params[1]) / 2
 
   time_step = env.reset()
-  actual_coords = [np.expand_dims(time_step.observation[:2], 0)]
+  obs=time_step
+  if hasattr(time_step, 'observation'):
+    obs=time_step.observation
+  actual_coords = [np.expand_dims(obs[:2], 0)]
+  #actual_coords = [np.expand_dims(time_step.observation[:2], 0)]
   actual_reward = 0.
   distance_to_goal_array = []
 
